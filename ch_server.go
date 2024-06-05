@@ -7,6 +7,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"github.com/marcboeker/go-duckdb"
+	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"regexp"
@@ -33,7 +34,9 @@ func (c *ChServer) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		query := r.URL.Query().Get("query")
-		query += "\n"
+		if query != "" {
+			query += "\n"
+		}
 		rd := bufio.NewReader(r.Body)
 		for {
 			if testSelectQueryRegexp.MatchString(query) {
@@ -46,7 +49,7 @@ func (c *ChServer) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 				c.InsertFormat(r.Context(), query, rd, wr)
 				return
 			}
-			if query != " " && (!testInsertRegexp.MatchString(query) || testInsertValuesQueryRegexp.MatchString(query)) {
+			if query != "" && (!testInsertRegexp.MatchString(query) || testInsertValuesQueryRegexp.MatchString(query)) {
 				d, _ := io.ReadAll(rd)
 				query += string(d)
 				c.ExecuteQuery(r.Context(), query, wr)
@@ -72,13 +75,15 @@ func (c *ChServer) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 var testSelectQueryRegexp = regexp.MustCompile(`(?i)^\s*SELECT.*$`)
 var selectFormatRegexp = regexp.MustCompile(`(?i)^\s*SELECT.* format (\S*?)[\s;]*$`)
 var formatCleanRegexp = regexp.MustCompile(`(?i)^\s*(SELECT.* )(format \S*?)[\s;]*$`)
+var limitRewriteRegexp = regexp.MustCompile(`(?i)LIMIT\s+(\d+)\s*,\s*(\d+)`)
 
 func (c *ChServer) SelectQuery(ctx context.Context, query string, wr http.ResponseWriter) {
 	//quick fix for datagrip
+	query = strings.TrimSpace(query)
 	query = strings.Replace(query, "select table", `select "table"`, 1)
-	query = strings.ReplaceAll(query, "version()", "'23.3.1.2823'")
-	//logrus.Infoln(query)
+	logrus.Debugf("Executing ch query: %s", query)
 	query = strings.ReplaceAll(query, "\n", " ")
+	query = limitRewriteRegexp.ReplaceAllString(query, "LIMIT $2 OFFSET $1")
 	if !testSelectQueryRegexp.MatchString(query) {
 		wr.WriteHeader(400)
 		_, _ = fmt.Fprintf(wr, "Invalid query")

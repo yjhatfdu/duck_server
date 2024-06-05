@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strconv"
 )
 
 // MessageType https://www.postgresql.org/docs/16/protocol-message-formats.html
@@ -425,6 +426,16 @@ type BindMessage struct {
 	ParameterValues []driver.Value
 }
 
+func tryParseValue(s string) driver.Value {
+	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return v
+	}
+	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return v
+	}
+	return s
+}
+
 func ParseBindMessage(message *Message) (BindMessage, error) {
 	d, err := message.Read()
 	if err != nil {
@@ -445,12 +456,12 @@ func ParseBindMessage(message *Message) (BindMessage, error) {
 	d = d[2:]
 	values := make([]driver.Value, 0)
 	for i := 0; i < valueCount; i++ {
-		l := int(binary.BigEndian.Uint32(d))
+		l := int32(binary.BigEndian.Uint32(d))
 		d = d[4:]
 		if l == -1 {
 			values = append(values, nil)
 		} else {
-			values = append(values, string(d[:l]))
+			values = append(values, tryParseValue(string(d[:l])))
 			d = d[l:]
 		}
 	}

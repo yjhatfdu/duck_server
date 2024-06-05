@@ -25,6 +25,7 @@ var pgTypes = []pgType{
 	{25, "text", 0},
 	{1700, "numeric", 0},
 	{1114, "timestamp", 0},
+	{1184, "timestamptz", 0},
 }
 
 var oidTypeMap = map[int32]pgType{}
@@ -55,9 +56,9 @@ func toPgValue(v any) (pgValue, error) {
 	case bool:
 		var b []byte
 		if v {
-			b = cstr("t")
+			b = []byte{'t'}
 		} else {
-			b = cstr("f")
+			b = []byte{'f'}
 		}
 		return pgValue{pgTypeFromOid(16), b}, nil
 	case int8:

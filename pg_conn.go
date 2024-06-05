@@ -13,12 +13,14 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 var parameterStatus = map[string]string{
-	"client_encoding": "UTF8",
-	"server_version":  "16.0-duckdb-0.10.2",
+	"client_encoding":             "UTF8",
+	"server_version":              "16.0-duckdb-0.10.2",
+	"standard_conforming_strings": "on",
 }
 
 type portal struct {
@@ -27,9 +29,10 @@ type portal struct {
 }
 
 type stmtDesc struct {
-	query   string
-	stmt    driver.Stmt
-	columns [][2]string
+	query    string
+	stmt     driver.Stmt
+	columns  [][2]string
+	numInput int
 }
 
 type PgConn struct {
@@ -51,6 +54,13 @@ func newPgConn(conn net.Conn, server *PgServer) *PgConn {
 	}
 	keyData := [8]byte{}
 	_, _ = rand.Read(keyData[:])
+	//tempConn := sql.OpenDB(server.Connector)
+	//defer tempConn.Close()
+	//row := tempConn.QueryRow("select version()")
+	//var version string
+	//_ = row.Scan(&version)
+	//logrus.Infof("connected to duckdb version: %s", version)
+	//parameterStatus["server_version"] = fmt.Sprintf("16.0-duckdb-%s", version)
 	return &PgConn{
 		wire: &Wire{
 			conn:   conn,
@@ -207,10 +217,13 @@ func (c *PgConn) Run() {
 	}()
 }
 
+const maxInputArgsUsePrepared = 20
+
 func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.Value, sendRowDesc bool) error {
 	if stmt == nil {
 		return c.wire.WriteMessage(NewMessage(EmptyQueryResponse, []byte{}))
 	}
+
 	var nv []driver.NamedValue
 	if len(values) > 0 {
 		nv = make([]driver.NamedValue, len(values))
@@ -225,11 +238,11 @@ func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.
 	defer rows.Close()
 	columnNames := rows.Columns()
 	rowValues := make([]driver.Value, len(columnNames))
-
+	rowCount := 0
 	if sendRowDesc {
 		if err := rows.Next(rowValues); err != nil {
 			if err == io.EOF {
-				return c.SendCommandComplete("Query Done")
+				return c.SendCommandComplete("(0 row)")
 			}
 			return c.SendErrorResponse(err.Error())
 		}
@@ -239,6 +252,7 @@ func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.
 		if err := c.SendRowData(rowValues); err != nil {
 			return c.SendErrorResponse(err.Error())
 		}
+		rowCount++
 	}
 	for {
 		if err := rows.Next(rowValues); err != nil {
@@ -248,20 +262,29 @@ func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.
 				return c.SendErrorResponse(err.Error())
 			}
 		} else {
+			rowCount++
 			if err := c.SendRowData(rowValues); err != nil {
 				return c.SendErrorResponse(err.Error())
 			}
 		}
 	}
-	return c.SendCommandComplete("Query Done")
+	return c.SendCommandComplete(fmt.Sprintf("(%d row)", rowCount))
 }
 
 func (c *PgConn) SimpleQuery(query string) error {
 	defer func() {
 		c.inError = false
 	}()
+	logrus.Debugf("simple query: %s", query)
+	if strings.TrimSpace(query) == "" {
+		//send empty query response
+		return c.wire.WriteMessage(NewMessage(EmptyQueryResponse, []byte{}))
+	}
 	if detectCopyInSQl(query) {
 		return c.CopyIn(query)
+	}
+	if strings.HasPrefix("show transaction_read_only", query) {
+		query = "select 0"
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
@@ -271,6 +294,9 @@ func (c *PgConn) SimpleQuery(query string) error {
 	}()
 	stmt, err := c.conn.Prepare(query)
 	if err != nil {
+		if strings.Contains(err.Error(), "No statement to prepare") {
+			return c.wire.WriteMessage(NewMessage(EmptyQueryResponse, []byte{}))
+		}
 		return c.SendErrorResponse(err.Error())
 	}
 	defer func() {
@@ -338,6 +364,7 @@ func (c *PgConn) SendRowDescription(columnNames []string, firstRowValues []drive
 }
 
 func (c *PgConn) SendErrorResponse(errStr string) error {
+	logrus.Errorf("send error response: %s", errStr)
 	c.inError = true
 	data := make([]byte, 0)
 	data = append(data, 'S')
@@ -395,14 +422,17 @@ func (c *PgConn) Prepare(name, sql string) error {
 		msg := NewMessage(ParseComplete, []byte{})
 		return c.wire.WriteMessage(msg)
 	}
-	//work around for datagrip
+	if strings.HasPrefix("show transaction_read_only", sql) {
+		sql = "select 0"
+	}
+	//work around for datagrip in clickhouse mode
 	if strings.HasPrefix(sql, "SET extra_float_digits") {
 		sql = "select 1 limit 0"
 	}
 	if strings.HasPrefix(sql, "SET application_name") {
 		sql = "select 1 limit 0"
 	}
-	//logrus.Infof("prepare %s: %s", name, sql)
+	logrus.Debugf("prepare %s: %s", name, sql)
 	if name != "" {
 		if _, ok := c.stmts[name]; ok {
 			return c.SendErrorResponse(fmt.Sprintf("prepared statement %s already exists", name))
@@ -412,7 +442,7 @@ func (c *PgConn) Prepare(name, sql string) error {
 	if err != nil {
 		return c.SendErrorResponse(err.Error())
 	}
-	c.stmts[name] = &stmtDesc{stmt: stmt, query: sql}
+	c.stmts[name] = &stmtDesc{stmt: stmt, query: sql, numInput: stmt.NumInput()}
 	msg := NewMessage(ParseComplete, []byte{})
 	return c.wire.WriteMessage(msg)
 }
@@ -468,7 +498,29 @@ func (c *PgConn) Execute(portalName string, maxRows int32) error {
 		cancel()
 		c.cancel = nil
 	}()
+	// work around for bad performance of using prepared statement with many input args, use simple query instead
+	// todo reduce cgo call in duckdb driver
+	if p.stmt.numInput > maxInputArgsUsePrepared {
+		query := bindValues(p.stmt.query, p.values)
+		stmt, err := c.conn.Prepare(query)
+		if err != nil {
+			return c.SendErrorResponse(err.Error())
+		}
+		defer stmt.Close()
+		return c.RunStmt(ctx, stmt, nil, false)
+	}
 	return c.RunStmt(ctx, p.stmt.stmt, p.values, false)
+}
+
+func (c *PgConn) DiscardAll() error {
+	c.portal = make(map[string]portal)
+	for _, stmt := range c.stmts {
+		if stmt.stmt != nil {
+			_ = stmt.stmt.Close()
+		}
+	}
+	c.stmts = make(map[string]*stmtDesc)
+	return c.wire.WriteMessage(NewMessage(CloseComplete, nil))
 }
 
 var extractCopyInRegexp = regexp.MustCompile(`(?i)COPY\s+(.*)\s+FROM\s+STDIN`)
@@ -639,4 +691,56 @@ func (r *copyReader) Read(p []byte) (n int, err error) {
 			return 0, fmt.Errorf("unexpected message type: %v", msg.Typ)
 		}
 	}
+}
+
+func bindValues(sql string, args []driver.Value) string {
+	sb := strings.Builder{}
+	lastIndex := 0
+	for {
+		idx := strings.IndexByte(sql[lastIndex:], '$')
+		if idx < 0 {
+			break
+		}
+		sb.WriteString(sql[lastIndex : lastIndex+idx])
+		lastIndex += idx
+		i := 0
+		seg := sql[lastIndex:]
+		for ; i < len(seg)-1; i++ {
+			chr := seg[i+1]
+			if chr < '0' || chr > '9' {
+				break
+			}
+		}
+		if i == 0 {
+			sb.WriteByte('$')
+			lastIndex++
+			continue
+		}
+		valueIdx, _ := strconv.ParseInt(seg[1:i+1], 10, 64)
+		if int(valueIdx) > len(args) {
+			sb.WriteString("null")
+			lastIndex += i + 1
+			continue
+		} else {
+			v := args[valueIdx-1]
+			if v == nil {
+				sb.WriteString("null")
+				lastIndex += i + 1
+				continue
+			}
+			switch vv := v.(type) {
+			case string:
+				sb.WriteString("'" + strings.ReplaceAll(vv, "'", "''") + "'")
+			case int64:
+				sb.WriteString(strconv.FormatInt(vv, 10))
+			case float64:
+				sb.WriteString(strconv.FormatFloat(vv, 'f', -1, 64))
+			default:
+				panic(fmt.Sprintf("unsupported bind type: %T", vv))
+			}
+			lastIndex += i + 1
+		}
+	}
+	sb.WriteString(sql[lastIndex:])
+	return sb.String()
 }

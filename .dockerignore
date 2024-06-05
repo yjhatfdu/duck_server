@@ -1,0 +1,4 @@
+.git
+*.db
+*.wal
+.idea

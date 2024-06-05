@@ -11,15 +11,17 @@ import (
 )
 
 var duck2pgTypeMap = map[string]string{
-	"BOOLEAN":   "bool",
-	"VARCHAR":   "text",
-	"INTEGER":   "int4",
-	"BIGINT":    "int8",
-	"DOUBLE":    "float8",
-	"TIMESTAMP": "timestamp",
-	"DECIMAL":   "numeric",
-	"DATE":      "date",
-	"VARCHAR[]": "text",
+	"BOOLEAN":                  "bool",
+	"VARCHAR":                  "text",
+	"INTEGER":                  "int4",
+	"BIGINT":                   "int8",
+	"DOUBLE":                   "float8",
+	"TIMESTAMP":                "timestamp",
+	"DECIMAL":                  "numeric",
+	"DATE":                     "date",
+	"VARCHAR[]":                "text",
+	"TIMESTAMP WITH TIME ZONE": "timestamptz",
+	"FLOAT":                    "float4",
 }
 
 func duck2pgType(s string) string {
@@ -56,6 +58,10 @@ var converters = map[string]converter{
 	},
 	"BIT": func(in string) (driver.Value, error) {
 		d, err := strconv.ParseInt(in, 10, 64)
+		return d, err
+	},
+	"TIMESTAMP": func(in string) (driver.Value, error) {
+		d, err := time.Parse("2006-01-02 15:04:05", in)
 		return d, err
 	},
 }
