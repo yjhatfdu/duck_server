@@ -15,6 +15,7 @@ type MessageType byte
 const (
 	// Authentication : AuthenticationOk, AuthenticationCleartextPassword, AuthenticationMD5Password, AuthenticationSCMCredential, AuthenticationGSS, AuthenticationGSSContinue, AuthenticationSSPI, AuthenticationSASL, AuthenticationSASLContinue, AuthenticationSASLFinal
 	Authentication           MessageType = 'R'
+	AuthenticationSASL       MessageType = 'R'
 	BackendKeyData           MessageType = 'K'
 	Bind                     MessageType = 'B'
 	BindComplete             MessageType = '2'
@@ -498,4 +499,70 @@ func ParseDescribeMessage(message *Message) (DescribeMessage, error) {
 		return DescribeMessage{}, err
 	}
 	return DescribeMessage{Message: message, Type: d[0], Name: goString(d[1:])}, nil
+}
+
+type AuthenticationSASLMessage struct {
+	*Message
+	Mechanisms []string
+}
+
+func NewAuthenticationSASLMessage(mechanisms []string) *AuthenticationSASLMessage {
+	buf := make([]byte, 0)
+	buf = append(buf, cint32(10)...)
+	for _, mech := range mechanisms {
+		buf = append(buf, cstr(mech)...)
+	}
+	buf = append(buf, 0)
+	return &AuthenticationSASLMessage{Message: NewMessage(AuthenticationSASL, buf), Mechanisms: mechanisms}
+}
+
+type SASLInitialResponseMessage struct {
+	*Message
+	Mechanism string
+	Initial   []byte
+}
+
+func (m *SASLInitialResponseMessage) String() string {
+	return fmt.Sprintf("Type: %s, Length: %d, Mechanism: %s, Initial: %s", "SASLInitialResponse", m.Length, m.Mechanism, string(m.Initial))
+}
+
+func ParseSASLInitialResponseMessage(message *Message) (*SASLInitialResponseMessage, error) {
+	if message.buf == nil {
+		_, err := message.Read()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if message.Typ != SASLInitialResponse {
+		return nil, fmt.Errorf("invalid SASL initial response message")
+	}
+	buf := message.buf
+	mech := goString(buf)
+	buf = buf[len(mech)+1:]
+	l := int32(binary.BigEndian.Uint32(buf))
+	d := buf[4 : l+4]
+	return &SASLInitialResponseMessage{Message: message, Mechanism: mech, Initial: d}, nil
+}
+
+type SASLResponseMessage struct {
+	*Message
+	Data []byte
+}
+
+func (m *SASLResponseMessage) String() string {
+	return fmt.Sprintf("Type: %s, Length: %d, Data: %s", "SASLResponse", m.Length, string(m.Data))
+}
+
+func ParseSASLResponseMessage(message *Message) (*SASLResponseMessage, error) {
+	if message.buf == nil {
+		_, err := message.Read()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if message.Typ != SASLResponse {
+		return nil, fmt.Errorf("invalid SASL response message")
+	}
+	buf := message.buf
+	return &SASLResponseMessage{Message: message, Data: buf}, nil
 }

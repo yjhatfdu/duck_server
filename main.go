@@ -19,6 +19,7 @@ func main() {
 	dbPath := flag.String("db_path", "./test.db", "Path to the database file")
 	logLevel := flag.String("log_level", "info", "Log level")
 	hack := flag.Bool("hack", true, "hack")
+	auth := flag.Bool("auth", true, "enable auth")
 	switch *logLevel {
 	case "trace":
 		logrus.SetLevel(logrus.TraceLevel)
@@ -41,6 +42,7 @@ func main() {
 			Enabled: true,
 			Listen:  *chListen,
 		},
+		Auth: *auth,
 	})
 	logrus.Fatal(err)
 }

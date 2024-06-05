@@ -2,3 +2,5 @@
 *.wal
 .idea
 build
+.gitignore
+.ds_store

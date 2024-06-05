@@ -54,13 +54,6 @@ func newPgConn(conn net.Conn, server *PgServer) *PgConn {
 	}
 	keyData := [8]byte{}
 	_, _ = rand.Read(keyData[:])
-	//tempConn := sql.OpenDB(server.Connector)
-	//defer tempConn.Close()
-	//row := tempConn.QueryRow("select version()")
-	//var version string
-	//_ = row.Scan(&version)
-	//logrus.Infof("connected to duckdb version: %s", version)
-	//parameterStatus["server_version"] = fmt.Sprintf("16.0-duckdb-%s", version)
 	return &PgConn{
 		wire: &Wire{
 			conn:   conn,
@@ -109,8 +102,8 @@ func (c *PgConn) Run() {
 			panic("invalid message type")
 		}
 		logrus.Debugf("receive startup: %v", startup)
-		if err = c.wire.WriteAuthOK(); err != nil {
-			logrus.Debugf("write auth ok error: %v", err)
+		if err = c.Auth(startup.Parameters["user"]); err != nil {
+			logrus.Debugf("auth error: %v", err)
 			return
 		}
 		if err = c.SendBackendKeyData(); err != nil {
@@ -271,11 +264,26 @@ func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.
 	return c.SendCommandComplete(fmt.Sprintf("(%d row)", rowCount))
 }
 
+var createUserRegexp = regexp.MustCompile(`(?i)^\s*create\s+user\s+(\w+)\s+with\s+password\s+'(.*)'\s*;?\s*$`)
+
 func (c *PgConn) SimpleQuery(query string) error {
 	defer func() {
 		c.inError = false
 	}()
 	logrus.Debugf("simple query: %s", query)
+	if c.server.enableAuth {
+		if createUserRegexp.MatchString(query) {
+			m := createUserRegexp.FindStringSubmatch(query)
+			if len(m) == 3 {
+				user := m[1]
+				password := m[2]
+				if err := c.server.CreateUser(user, password); err != nil {
+					return c.SendErrorResponse(err.Error())
+				}
+				return c.SendCommandComplete("CREATE USER")
+			}
+		}
+	}
 	if strings.TrimSpace(query) == "" {
 		//send empty query response
 		return c.wire.WriteMessage(NewMessage(EmptyQueryResponse, []byte{}))

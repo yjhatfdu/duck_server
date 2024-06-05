@@ -2,29 +2,106 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/base64"
 	"fmt"
 	"github.com/marcboeker/go-duckdb"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/pbkdf2"
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
+
+const authTTL = 60
+
+type authItem struct {
+	user     string
+	password string
+	time     time.Time
+}
 
 type ChServer struct {
 	conn      *sql.DB
 	connector driver.Connector
+	pgServer  *PgServer
+	authCache sync.Map
 }
 
 var testInsertFormatRegexp = regexp.MustCompile(`(?i)^\s*INSERT\s+INTO.*?format\s+\S+[\s;]*$`)
 var testInsertValuesQueryRegexp = regexp.MustCompile(`(?i)^\s*INSERT\s+INTO.*VALUES.*[\s;]*$`)
 var testInsertRegexp = regexp.MustCompile(`(?i)^\s*INSERT$`)
 
+func getSHA256Sum(key []byte) []byte {
+	h := sha256.New()
+	_, _ = h.Write(key)
+	return h.Sum(nil)
+}
+
+func (c *ChServer) Auth(user, password string) error {
+	if cacheItem, ok := c.authCache.Load("user"); ok {
+		if time.Since(cacheItem.(*authItem).time).Seconds() < authTTL {
+			if cacheItem.(*authItem).password == password {
+				return nil
+			} else {
+				return fmt.Errorf("invalid username or password")
+			}
+		}
+	}
+	pgpassword, err := c.pgServer.GetPassword(user)
+	if err != nil {
+		return fmt.Errorf("invalid username or password")
+	}
+	groups := regexp.MustCompile(`^SCRAM-SHA-256\$(\d+):(.*?)\$(.*?):(.*?)$`).FindStringSubmatch(pgpassword)
+	if len(groups) != 5 {
+		logrus.Warnf("invalid password format: %s", pgpassword)
+	}
+	salt, _ := base64.StdEncoding.DecodeString(groups[2])
+	iterations := groups[1]
+	serverKey, _ := base64.StdEncoding.DecodeString(groups[4])
+	iterationsInt, _ := strconv.Atoi(iterations)
+	digestKey := pbkdf2.Key([]byte(password), salt, iterationsInt, 32, sha256.New)
+	computed := computeHMAC(digestKey, []byte("Server Key"))
+	if !bytes.Equal(computed, serverKey) {
+		return fmt.Errorf("invalid username or password")
+	}
+	c.authCache.Store(user, &authItem{user: user, password: password, time: time.Now()})
+	return nil
+}
+
 func (c *ChServer) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+	if c.pgServer.enableAuth {
+		user, password, ok := r.BasicAuth()
+		if !ok {
+			user = r.URL.Query().Get("user")
+			password = r.URL.Query().Get("password")
+		}
+		if user == "" {
+			wr.WriteHeader(401)
+			_, _ = fmt.Fprintf(wr, "User not specified")
+			return
+		}
+		if password == "" {
+			wr.WriteHeader(401)
+			_, _ = fmt.Fprintf(wr, "Password not specified")
+			return
+		}
+		err := c.Auth(user, password)
+		if err != nil {
+			wr.WriteHeader(401)
+			_, _ = fmt.Fprintf(wr, "Unauthorized: %s", err)
+			return
+		}
+	}
 	if r.Method == http.MethodGet {
 		query := r.URL.Query().Get("query")
 		d, _ := io.ReadAll(r.Body)
@@ -80,6 +157,7 @@ var limitRewriteRegexp = regexp.MustCompile(`(?i)LIMIT\s+(\d+)\s*,\s*(\d+)`)
 func (c *ChServer) SelectQuery(ctx context.Context, query string, wr http.ResponseWriter) {
 	//quick fix for datagrip
 	query = strings.TrimSpace(query)
+	query = strings.ReplaceAll(query, "version()", "'23.3.1.2823'")
 	query = strings.Replace(query, "select table", `select "table"`, 1)
 	logrus.Debugf("Executing ch query: %s", query)
 	query = strings.ReplaceAll(query, "\n", " ")

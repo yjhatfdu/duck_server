@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"github.com/marcboeker/go-duckdb"
 	"github.com/sirupsen/logrus"
+	"github.com/supercaracal/scram-sha-256/pkg/pgpasswd"
 	"net"
 	"net/http"
 	"sync"
@@ -21,12 +22,14 @@ type serverOptions struct {
 	Listen            string
 	ClickhouseOptions ClickhouseOptions
 	UseHack           bool
+	Auth              bool
 }
 
 type PgServer struct {
-	Connector *duckdb.Connector
-	conn      *sql.DB
-	backends  sync.Map
+	Connector  *duckdb.Connector
+	conn       *sql.DB
+	backends   sync.Map
+	enableAuth bool
 }
 
 func duckdbInit(execer driver.ExecerContext) error {
@@ -35,7 +38,6 @@ func duckdbInit(execer driver.ExecerContext) error {
 		`create view if not exists information_schema.constraint_column_usage as select '' constraint_name limit 0;`,
 		`create function if not exists array_positions(a,b) as 0;`,
 		`create function if not exists timezone() as 'utc';`,
-		`create function if not exists version() as '23.3.1.2823';`,
 		`create function if not exists currentDatabase() as current_schema();`,
 		`create schema if not exists system;`,
 		`create view if not exists system.databases as
@@ -86,6 +88,11 @@ func (s *PgServer) Start(options serverOptions) error {
 	logrus.Infof("Open DuckDB database at %s", options.DbPath)
 	s.Connector = duckConnector
 	s.conn = sql.OpenDB(s.Connector)
+	if options.Auth {
+		s.enableAuth = true
+		_, err = s.conn.ExecContext(context.Background(), "create schema if not exists duckserver;")
+		_, err = s.conn.ExecContext(context.Background(), "create table if not exists duckserver.users (username text primary key, password text);")
+	}
 	if options.ClickhouseOptions.Enabled {
 		go s.StartClickhouseHttp(options.ClickhouseOptions)
 	}
@@ -104,8 +111,24 @@ func (s *PgServer) Start(options serverOptions) error {
 	}
 }
 
+func (s *PgServer) CreateUser(user, password string) error {
+	pass, err := pgpasswd.Encrypt([]byte(password))
+	if err != nil {
+		return err
+	}
+	_, err = s.conn.ExecContext(context.Background(), "insert into duckserver.users (username, password) values ($1, $2)", user, pass)
+	return err
+}
+
+func (s *PgServer) GetPassword(user string) (string, error) {
+	var pass string
+	err := s.conn.QueryRowContext(context.Background(),
+		"select password from duckserver.users where username = $1", user).Scan(&pass)
+	return pass, err
+}
+
 func (s *PgServer) StartClickhouseHttp(options ClickhouseOptions) {
-	chServer := ChServer{conn: sql.OpenDB(s.Connector), connector: s.Connector}
+	chServer := ChServer{conn: sql.OpenDB(s.Connector), connector: s.Connector, pgServer: s}
 	logrus.Infof("Listening clickhouse http protocol on %s", options.Listen)
 	logrus.Fatal(http.ListenAndServe(options.Listen, &chServer))
 }
