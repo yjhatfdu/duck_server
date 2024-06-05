@@ -3,8 +3,8 @@ module duckserver
 go 1.22
 
 require (
-	github.com/goccy/go-json v0.10.2
-	github.com/marcboeker/go-duckdb v1.6.3
+	github.com/goccy/go-json v0.10.3
+	github.com/marcboeker/go-duckdb v1.6.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/supercaracal/scram-sha-256 v1.0.3
 )
