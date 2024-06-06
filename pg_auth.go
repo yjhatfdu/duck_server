@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"regexp"
+	"strings"
 )
 
 const clientNonceLen = 18
@@ -18,10 +19,10 @@ func (c *PgConn) Auth(user string) error {
 	if c.server.enableAuth == false {
 		return c.NoAuth()
 	}
-	//addr := strings.Split(c.wire.conn.RemoteAddr().String(), ":")[0]
-	//if addr == "localhost" || addr == "127.0.0.1" || addr == "::1" {
-	//	return c.NoAuth()
-	//}
+	addr := strings.Split(c.wire.conn.RemoteAddr().String(), ":")[0]
+	if addr == "localhost" || addr == "127.0.0.1" || addr == "::1" {
+		return c.NoAuth()
+	}
 	return c.ScramSha256Auth(user)
 }
 
