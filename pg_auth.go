@@ -103,7 +103,7 @@ func (c *PgConn) ScramSha256Auth(user string) error {
 		return c.SendErrorResponse(fmt.Sprintf("password authentication failed for user %s", user))
 	}
 	serverSignature := computeServerSignature(serverKey, []byte(authMessage))
-	if err = c.wire.WriteMessage(NewMessage('R', append(cint32(11), []byte("v="+serverSignature)...))); err != nil {
+	if err = c.wire.WriteMessage(NewMessage('R', append(cint32(12), []byte("v="+serverSignature)...))); err != nil {
 		return err
 	}
 	return c.wire.WriteAuthOK()
