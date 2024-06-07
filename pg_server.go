@@ -89,6 +89,7 @@ func (s *PgServer) Start(options serverOptions) error {
 	logrus.Infof("Open DuckDB database at %s", options.DbPath)
 	s.Connector = duckConnector
 	s.conn = sql.OpenDB(s.Connector)
+
 	if options.Auth {
 		s.enableAuth = true
 		_, err = s.conn.ExecContext(context.Background(), "create schema if not exists duckserver;")

@@ -1,15 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/sirupsen/logrus"
+	"github.com/xdg-go/scram"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -35,9 +35,9 @@ func (c *PgConn) ScramSha256Auth(user string) error {
 	if err := c.wire.WriteMessage(authSaslMsg); err != nil {
 		return err
 	}
-	var saslInitialData []byte
 	var msg *Message
 	var err error
+	var saslInitialData []byte
 	if msg, err = c.wire.ReadMessage(); err != nil {
 		return err
 	} else {
@@ -51,88 +51,63 @@ func (c *PgConn) ScramSha256Auth(user string) error {
 			saslInitialData = saslInitialMsg.Initial
 		}
 	}
-	if saslInitialData == nil {
-		return errors.New("invalid initial data")
-	}
-	clientNonce, err := readClientNonce(saslInitialData)
+	scramServer, err := scram.SHA256.NewServer(func(q string) (scram.StoredCredentials, error) {
+		var pass string
+		err := c.server.conn.QueryRow("select password from duckserver.users where username = $1", user).Scan(&pass)
+		if err != nil {
+			return scram.StoredCredentials{}, err
+		}
+		groups := regexp.MustCompile(`^SCRAM-SHA-256\$(\d+):(.*?)\$(.*?):(.*?)$`).FindStringSubmatch(pass)
+		if len(groups) != 5 {
+			return scram.StoredCredentials{}, errors.New("invalid password format")
+		}
+		salt, _ := base64.StdEncoding.DecodeString(groups[2])
+		iterations := groups[1]
+		iterationsint, _ := strconv.Atoi(iterations)
+		storedKey, _ := base64.StdEncoding.DecodeString(groups[3])
+		serverKey, _ := base64.StdEncoding.DecodeString(groups[4])
+		return scram.StoredCredentials{
+			StoredKey: storedKey,
+			ServerKey: serverKey,
+			KeyFactors: scram.KeyFactors{
+				Salt:  string(salt),
+				Iters: iterationsint,
+			},
+		}, nil
+	})
 	if err != nil {
-		return err
-	}
-	serverNonce := make([]byte, clientNonceLen)
-	_, _ = rand.Read(serverNonce)
-	serverNonceStr := base64.RawStdEncoding.EncodeToString(serverNonce)
-	clientAndServerNonce := clientNonce + serverNonceStr
-	pgpassword, err := c.server.GetPassword(user)
-	if err != nil {
+		logrus.Infof("error: %v", err)
 		return c.SendErrorResponse(fmt.Sprintf("password authentication failed for user %s", user))
 	}
-	//parse password
-	groups := regexp.MustCompile(`^SCRAM-SHA-256\$(\d+):(.*?)\$(.*?):(.*?)$`).FindStringSubmatch(pgpassword)
-	if len(groups) != 5 {
-		logrus.Warnf("invalid password format: %s", pgpassword)
+	conversation := scramServer.NewConversation()
+	defer conversation.Done()
+	resp, err := conversation.Step(string(saslInitialData))
+	if err != nil {
+		logrus.Infof("error: %v", err)
 		return c.SendErrorResponse(fmt.Sprintf("password authentication failed for user %s", user))
 	}
-	salt := groups[2]
-	iterations := groups[1]
-	serverFirstResp := fmt.Sprintf("r=%s,s=%s,i=%s", clientAndServerNonce, salt, iterations)
-	if err := c.wire.WriteMessage(NewMessage('R', append(cint32(11), []byte(serverFirstResp)...))); err != nil {
+	if err := c.wire.WriteMessage(NewMessage('R', append(cint32(11), []byte(resp)...))); err != nil {
 		return err
 	}
-	var clientFinalData map[string]string
 	if msg, err = c.wire.ReadMessage(); err != nil {
 		return err
 	} else {
 		if saslFinalMsg, err := ParseSASLResponseMessage(msg); err != nil {
 			return nil
 		} else {
-			//logrus.Infoln(saslFinalMsg)
-			clientFinalData = parseSaslData(saslFinalMsg.Data)
+			resp, err := conversation.Step(string(saslFinalMsg.Data))
+			if err != nil {
+				logrus.Infof("error: %v", err)
+				return c.SendErrorResponse(fmt.Sprintf("password authentication failed for user %s", user))
+			}
+			if err = c.wire.WriteMessage(NewMessage('R', append(cint32(12), []byte(resp)...))); err != nil {
+				return err
+			}
 		}
-	}
-	storedKey, _ := base64.StdEncoding.DecodeString(groups[3])
-	clientProof, _ := base64.StdEncoding.DecodeString(clientFinalData["p"])
-	serverKey, _ := base64.StdEncoding.DecodeString(groups[4])
-	authMessage := "n=,r=" + clientNonce + "," + serverFirstResp + "," + fmt.Sprintf("c=biws,r=%s", clientAndServerNonce)
-	clientSignature := computeHMAC(storedKey[:], []byte(authMessage))
-	clientKey := make([]byte, len(clientSignature))
-	for i := 0; i < len(clientSignature); i++ {
-		clientKey[i] = clientProof[i] ^ clientSignature[i]
-	}
-	storedKeyComputed := sha256.Sum256(clientKey)
-	if !bytes.Equal(storedKey, storedKeyComputed[:]) {
-		return c.SendErrorResponse(fmt.Sprintf("password authentication failed for user %s", user))
-	}
-	serverSignature := computeServerSignature(serverKey, []byte(authMessage))
-	if err = c.wire.WriteMessage(NewMessage('R', append(cint32(12), []byte("v="+serverSignature)...))); err != nil {
-		return err
 	}
 	return c.wire.WriteAuthOK()
 }
 
-func parseSaslData(data []byte) map[string]string {
-	m := make(map[string]string)
-	for _, kv := range bytes.Split(data, []byte{','}) {
-		kv := bytes.SplitN(kv, []byte{'='}, 2)
-		if len(kv) != 2 {
-			continue
-		}
-		m[string(kv[0])] = string(kv[1])
-	}
-	return m
-}
-
-func readClientNonce(data []byte) (string, error) {
-	m := parseSaslData(data)
-	if v, ok := m["r"]; ok {
-		return v, nil
-	}
-	return "", errors.New("not found")
-}
-
-func computeServerSignature(serverKey []byte, authMessage []byte) string {
-	serverSignature := computeHMAC(serverKey, authMessage)
-	return base64.StdEncoding.EncodeToString(serverSignature)
-}
 func computeHMAC(key, msg []byte) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(msg)

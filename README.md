@@ -3,6 +3,15 @@
 A standalone [DuckDB](https://duckdb.org) server support postgresql wire protocol and clickhouse http protocol. Build
 with [DuckDB go driver](https://github.com/marcboeker/go-duckdb).
 
+## Updates
+### v0.1.0
+- Support SCRAM-SHA-256 authentication for postgresql protocol
+- Support basic auth for clickhouse http protocol
+- Support ```CREATE USER username WITH PASSWORD 'password'``` statement for postgresql protocol
+- Support more data types in DuckDB
+- Embed some views and functions for clickhouse compatibility(try to connect via datagrip with compress=false)
+- Fix many bugs
+
 ## Why?
 
 DuckDB is a high performance in-memory OLAP database, but it doesn't support network access. This project is a simple
@@ -78,7 +87,7 @@ $ curl -X POST 'http://localhost:8123/?query=INSERT%20INTO%20tbl%20FORMAT%20CSV'
 ## Limitation
 
 - No support for clickhouse TCP protocol, so clickhouse-client doesn't work
-- No authentication support for now, so only use in trusted network
+- ~~No authentication support for now, so only use in trusted network~~
 - No user and privilege management, DuckDB can execute shell, use with caution
 - Some database tools may not work well, like pgAdmin, dbeaver, etc
 - Some prepared statement with dynamic type may not work well,
@@ -95,7 +104,7 @@ $ curl -X POST 'http://localhost:8123/?query=INSERT%20INTO%20tbl%20FORMAT%20CSV'
 - [x] Support basic auth for clickhouse http protocol
 - [ ] Support http compression for clickhouse http protocol
 - [ ] Tests for postgresql and clickhouse protocol
-- [ ] Documentation for code
+- [ ] Documentation
 - [ ] CI and release build
 
 ## Caution⚠️
