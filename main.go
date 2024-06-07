@@ -20,6 +20,7 @@ func main() {
 	logLevel := flag.String("log_level", "info", "Log level")
 	hack := flag.Bool("hack", true, "hack")
 	auth := flag.Bool("auth", true, "enable auth")
+	flag.Parse()
 	switch *logLevel {
 	case "trace":
 		logrus.SetLevel(logrus.TraceLevel)
@@ -32,7 +33,6 @@ func main() {
 	case "error":
 		logrus.SetLevel(logrus.ErrorLevel)
 	}
-	flag.Parse()
 	server := PgServer{}
 	err := server.Start(serverOptions{
 		DbPath:  *dbPath,

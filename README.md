@@ -91,8 +91,8 @@ $ curl -X POST 'http://localhost:8123/?query=INSERT%20INTO%20tbl%20FORMAT%20CSV'
 - [ ] A funny logo for DuckServer
 - [ ] Support all data types in DuckDB
 - [ ] Support postgresql style 'Copy To Stdout'
-- [ ] Support SCRAM-SHA-256 authentication for postgresql protocol
-- [ ] Support basic auth for clickhouse http protocol
+- [x] Support SCRAM-SHA-256 authentication for postgresql protocol
+- [x] Support basic auth for clickhouse http protocol
 - [ ] Support http compression for clickhouse http protocol
 - [ ] Tests for postgresql and clickhouse protocol
 - [ ] Documentation for code

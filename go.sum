@@ -3,8 +3,6 @@ github.com/apache/arrow/go/v14 v14.0.2/go.mod h1:u3fgh3EdgN/YQ8cVQRguVW3R+seMybF
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/goccy/go-json v0.10.2 h1:CrxCmQqYDkv1z7lO7Wbh2HN93uovUHgrECaO5ZrCXAU=
-github.com/goccy/go-json v0.10.2/go.mod h1:6MelG93GURQebXPDq3khkgXZkazVtN9CRI+MGFi0w8I=
 github.com/goccy/go-json v0.10.3 h1:KZ5WoDbxAIgm2HNbYckL0se1fHD6rz5j4ywS6ebzDqA=
 github.com/goccy/go-json v0.10.3/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/google/flatbuffers v23.5.26+incompatible h1:M9dgRyhJemaM4Sw8+66GHBu8ioaQmyPLg1b8VwK5WJg=
@@ -15,9 +13,13 @@ github.com/klauspost/compress v1.16.7 h1:2mk3MPGNzKyxErAw8YaohYh69+pa4sIQSC0fPGC
 github.com/klauspost/compress v1.16.7/go.mod h1:ntbaceVETuRiXiv4DpjP66DpAtAGkEQskQzEyD//IeE=
 github.com/klauspost/cpuid/v2 v2.2.5 h1:0E5MSMDEoAulmXNFquVs//DdoomxaoTY1kUhbc/qbZg=
 github.com/klauspost/cpuid/v2 v2.2.5/go.mod h1:Lcz8mBdAVJIBVzewtcLocK12l3Y+JytZYpaMropDUws=
+github.com/marcboeker/go-duckdb v1.6.0 h1:bVG2+CuCdZtVOE0LyedXFw6TainJYb0c/2ZL5p/uqTw=
+github.com/marcboeker/go-duckdb v1.6.0/go.mod h1:FXt5ZuZuX7rf1Uj8sj5MgUROTguyw4XUirfv5tsrK1E=
 github.com/marcboeker/go-duckdb v1.6.3 h1:5qRxB3BosFXRjfQWNP0OOqEQFXllo6o7fHGrNA7NSuM=
 github.com/marcboeker/go-duckdb v1.6.3/go.mod h1:WtWeqqhZoTke/Nbd7V9lnBx7I2/A/q0SAq/urGzPCMs=
+github.com/marcboeker/go-duckdb v1.6.6 h1:SK8qos/VJNPZPra0M/upxsWwuEHi+coSSFsEDUyil1Q=
 github.com/marcboeker/go-duckdb v1.6.6/go.mod h1:WtWeqqhZoTke/Nbd7V9lnBx7I2/A/q0SAq/urGzPCMs=
+github.com/marcboeker/go-duckdb v1.7.0/go.mod h1:WtWeqqhZoTke/Nbd7V9lnBx7I2/A/q0SAq/urGzPCMs=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/pierrec/lz4/v4 v4.1.18 h1:xaKrnTkyoqfh1YItXl56+6KJNVYWlEEPuAQW9xsplYQ=

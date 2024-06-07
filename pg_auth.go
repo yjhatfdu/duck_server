@@ -85,7 +85,7 @@ func (c *PgConn) ScramSha256Auth(user string) error {
 		if saslFinalMsg, err := ParseSASLResponseMessage(msg); err != nil {
 			return nil
 		} else {
-			logrus.Infoln(saslFinalMsg)
+			//logrus.Infoln(saslFinalMsg)
 			clientFinalData = parseSaslData(saslFinalMsg.Data)
 		}
 	}

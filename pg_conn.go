@@ -19,7 +19,7 @@ import (
 
 var parameterStatus = map[string]string{
 	"client_encoding":             "UTF8",
-	"server_version":              "16.0-duckdb-0.10.2",
+	"server_version":              "16.0-duckdb-1.0.0",
 	"standard_conforming_strings": "on",
 }
 
@@ -265,6 +265,7 @@ func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.
 }
 
 var createUserRegexp = regexp.MustCompile(`(?i)^\s*create\s+user\s+(\w+)\s+with\s+password\s+'(.*)'\s*;?\s*$`)
+var testDiscardAllRegexp = regexp.MustCompile(`(?i)^\s*discard\s+all\s*;?\s*$`)
 
 func (c *PgConn) SimpleQuery(query string) error {
 	defer func() {
@@ -287,6 +288,9 @@ func (c *PgConn) SimpleQuery(query string) error {
 	if strings.TrimSpace(query) == "" {
 		//send empty query response
 		return c.wire.WriteMessage(NewMessage(EmptyQueryResponse, []byte{}))
+	}
+	if testDiscardAllRegexp.MatchString(query) {
+		return c.DiscardAll()
 	}
 	if detectCopyInSQl(query) {
 		return c.CopyIn(query)
@@ -528,7 +532,7 @@ func (c *PgConn) DiscardAll() error {
 		}
 	}
 	c.stmts = make(map[string]*stmtDesc)
-	return c.wire.WriteMessage(NewMessage(CloseComplete, nil))
+	return c.SendCommandComplete("DISCARD ALL")
 }
 
 var extractCopyInRegexp = regexp.MustCompile(`(?i)COPY\s+(.*)\s+FROM\s+STDIN`)
@@ -701,6 +705,7 @@ func (r *copyReader) Read(p []byte) (n int, err error) {
 	}
 }
 
+// todo use lexer for better correctness
 func bindValues(sql string, args []driver.Value) string {
 	sb := strings.Builder{}
 	lastIndex := 0

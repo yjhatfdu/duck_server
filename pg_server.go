@@ -34,6 +34,7 @@ type PgServer struct {
 
 func duckdbInit(execer driver.ExecerContext) error {
 	var statements = []string{
+		`create view if not exists pg_type as select type_oid,case when logical_type like '%TIMESTAMP_%' then 'TIMESTAMP' else logical_type end from duckdb_types where type_oid is not null;`,
 		`create view if not exists pg_matviews as select '' as  matviewname , '' as schemaname limit 0;`,
 		`create view if not exists information_schema.constraint_column_usage as select '' constraint_name limit 0;`,
 		`create function if not exists array_positions(a,b) as 0;`,

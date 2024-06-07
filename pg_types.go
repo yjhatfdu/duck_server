@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/goccy/go-json"
 	"github.com/marcboeker/go-duckdb"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +28,7 @@ var pgTypes = []pgType{
 	{1700, "numeric", 0},
 	{1114, "timestamp", 0},
 	{1184, "timestamptz", 0},
+	{114, "json", 0},
 }
 
 var oidTypeMap = map[int32]pgType{}
@@ -99,6 +102,10 @@ func toPgValue(v any) (pgValue, error) {
 		s := v.Format("2006-01-02 15:04:05.999999")
 		b := []byte(s)
 		return pgValue{pgTypeFromOid(25), b}, nil
+	case *big.Int:
+		s := v.String()
+		b := []byte(s)
+		return pgValue{pgTypeFromOid(1700), b}, nil
 	case []any:
 		var res []string
 		for _, e := range v {
@@ -110,6 +117,15 @@ func toPgValue(v any) (pgValue, error) {
 		}
 		b := []byte("{" + strings.Join(res, ",") + "}")
 		return pgValue{pgTypeFromOid(25), b}, nil
+	case duckdb.Map:
+		if v == nil {
+			return pgValue{pgTypeFromOid(114), nil}, nil
+		}
+		res, err := json.Marshal(v)
+		if err != nil {
+			return pgValue{pgTypeFromOid(114), []byte{}}, nil
+		}
+		return pgValue{pgTypeFromOid(114), res}, nil
 
 	default:
 		return pgValue{}, fmt.Errorf("unsupported type %T", v)
