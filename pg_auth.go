@@ -80,6 +80,7 @@ func (c *PgConn) ScramSha256Auth(user string) error {
 		return c.SendErrorResponse(fmt.Sprintf("password authentication failed for user %s", user))
 	}
 	conversation := scramServer.NewConversation()
+
 	defer conversation.Done()
 	resp, err := conversation.Step(string(saslInitialData))
 	if err != nil {

@@ -212,7 +212,7 @@ func (c *PgConn) Run() {
 
 const maxInputArgsUsePrepared = 20
 
-func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.Value, sendRowDesc bool) error {
+func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.Value, sendRowDesc bool, query string) error {
 	if stmt == nil {
 		return c.wire.WriteMessage(NewMessage(EmptyQueryResponse, []byte{}))
 	}
@@ -235,6 +235,13 @@ func (c *PgConn) RunStmt(ctx context.Context, stmt driver.Stmt, values []driver.
 	if sendRowDesc {
 		if err := rows.Next(rowValues); err != nil {
 			if err == io.EOF {
+				types, err := c.inferStmtOutputNamesAndTypes(ctx, query)
+				if err != nil {
+					return c.SendErrorResponse(err.Error())
+				}
+				if err := c.SendRowDescriptionWithColumnNameAndTypes(types); err != nil {
+					return c.SendErrorResponse(err.Error())
+				}
 				return c.SendCommandComplete("(0 row)")
 			}
 			return c.SendErrorResponse(err.Error())
@@ -314,7 +321,7 @@ func (c *PgConn) SimpleQuery(query string) error {
 	defer func() {
 		stmt.Close()
 	}()
-	return c.RunStmt(ctx, stmt, nil, true)
+	return c.RunStmt(ctx, stmt, nil, true, query)
 }
 
 func (c *PgConn) SendParameterDescription(numInput int) error {
@@ -519,9 +526,9 @@ func (c *PgConn) Execute(portalName string, maxRows int32) error {
 			return c.SendErrorResponse(err.Error())
 		}
 		defer stmt.Close()
-		return c.RunStmt(ctx, stmt, nil, false)
+		return c.RunStmt(ctx, stmt, nil, false, p.stmt.query)
 	}
-	return c.RunStmt(ctx, p.stmt.stmt, p.values, false)
+	return c.RunStmt(ctx, p.stmt.stmt, p.values, false, p.stmt.query)
 }
 
 func (c *PgConn) DiscardAll() error {
